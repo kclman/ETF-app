@@ -18,7 +18,7 @@ public class DailyUpdateReceiver extends BroadcastReceiver {
                 int fail = 0;
                 StringBuilder failed = new StringBuilder();
                 for (String code : codes) {
-                    EtfItem item = EtfApi.fetch(store.getApiUrl(), code);
+                    EtfItem item = EtfApi.fetchDirect(code);
                     if (item.hasError()) {
                         fail++;
                         if (failed.length() < 60) failed.append(code).append(" ");

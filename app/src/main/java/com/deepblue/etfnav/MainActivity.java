@@ -14,6 +14,9 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.webkit.WebSettings;
+import android.webkit.WebView;
+import android.webkit.WebViewClient;
 
 import java.util.List;
 
@@ -21,7 +24,6 @@ public class MainActivity extends Activity {
     private EtfStore store;
     private LinearLayout listBox;
     private EditText codeInput;
-    private EditText apiInput;
     private TextView statusText;
 
     @Override
@@ -51,26 +53,11 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView hint = new TextView(this);
-        hint.setText("輸入 ETF 代碼後加入自選清單。每天 18:30 會嘗試更新一次。API URL 請填你的後端入口。");
+        hint.setText("輸入 ETF 代碼後加入自選清單。App 會直接連 TWSE 即時報價與 ETF 淨值揭露頁，不再需要 API URL。每天 18:30 會嘗試更新一次。");
         hint.setTextSize(14);
         hint.setTextColor(Color.rgb(95, 99, 104));
         hint.setPadding(0, 0, 0, dp(12));
         root.addView(hint);
-
-        apiInput = new EditText(this);
-        apiInput.setSingleLine(true);
-        apiInput.setHint("API URL，例如 https://domain/api/etf/latest");
-        apiInput.setText(store.getApiUrl());
-        apiInput.setTextSize(13);
-        root.addView(apiInput, matchWrap());
-
-        Button saveApiButton = new Button(this);
-        saveApiButton.setText("儲存 API URL");
-        saveApiButton.setOnClickListener(v -> {
-            store.setApiUrl(apiInput.getText().toString());
-            toast("API URL 已儲存");
-        });
-        root.addView(saveApiButton, matchWrap());
 
         LinearLayout addRow = new LinearLayout(this);
         addRow.setOrientation(LinearLayout.HORIZONTAL);
@@ -158,16 +145,17 @@ public class MainActivity extends Activity {
         body.setTextColor(Color.rgb(60, 64, 67));
         body.setPadding(0, dp(8), 0, dp(8));
         if (item == null) {
-            body.setText("尚未更新。按立即更新，讓它開始像個 App，而不是桌面裝飾。");
+            body.setText("尚未更新。按更新，讓它自己去 TWSE 找資料，而不是當桌面裝飾。");
         } else if (item.hasError()) {
             body.setText("錯誤：" + item.error);
         } else {
             body.setText(
                     "市價：" + blank(item.marketPrice) + "\n" +
-                    "淨值：" + blank(item.nav) + "\n" +
+                    "預估淨值：" + blank(item.nav) + "\n" +
                     "折溢價：" + blank(item.premiumDiscount) + "\n" +
-                    "昨日淨值：" + blank(item.previousNav) + "\n" +
-                    "更新：" + blank(item.dataDate) + " " + blank(item.dataTime)
+                    "前日淨值：" + blank(item.previousNav) + "\n" +
+                    "更新：" + blank(item.dataDate) + " " + blank(item.dataTime) + "\n" +
+                    "來源：" + blank(item.source)
             );
         }
         card.addView(body);
@@ -192,13 +180,70 @@ public class MainActivity extends Activity {
     private void fetchOne(String code, boolean showToast) {
         statusText.setText("更新 " + code + " 中...");
         new Thread(() -> {
-            EtfItem item = EtfApi.fetch(store.getApiUrl(), code);
-            if (!item.hasError()) store.saveItem(item);
+            EtfItem item = EtfApi.fetchDirect(code);
             runOnUiThread(() -> {
-                refreshList(false);
-                if (showToast) toast(item.hasError() ? item.error : code + " 更新完成");
+                if (!item.hasError() && (item.nav == null || item.nav.isEmpty())) {
+                    statusText.setText("更新 " + code + " 中...嘗試讀取 TWSE 淨值揭露頁");
+                    fetchNavViaWebView(code, item, showToast, 0);
+                } else {
+                    finishFetch(code, item, showToast);
+                }
             });
         }).start();
+    }
+
+    private void finishFetch(String code, EtfItem item, boolean showToast) {
+        if (!item.hasError()) store.saveItem(item);
+        refreshList(false);
+        if (showToast) toast(item.hasError() ? item.error : code + " 更新完成");
+    }
+
+    private void fetchNavViaWebView(String code, EtfItem base, boolean showToast, int step) {
+        final String[] urls = new String[] {
+                "https://mis.twse.com.tw/stock/various-areas/etf-price/indicator-disclosure-etf?lang=zhHant",
+                "https://mis.twse.com.tw/stock/various-areas/etf-price/value-disclosure-etf?lang=zhHant"
+        };
+        if (step >= urls.length) {
+            base.source = base.source + "；預估淨值頁未解析";
+            finishFetch(code, base, showToast);
+            return;
+        }
+
+        WebView webView = new WebView(this);
+        webView.setVisibility(View.GONE);
+        WebSettings settings = webView.getSettings();
+        settings.setJavaScriptEnabled(true);
+        settings.setDomStorageEnabled(true);
+        settings.setUserAgentString("Mozilla/5.0 (Linux; Android) ETFNavTracker/1.0.2");
+
+        webView.setWebViewClient(new WebViewClient() {
+            private boolean handled = false;
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                if (handled) return;
+                handled = true;
+                view.postDelayed(() -> view.evaluateJavascript(
+                        "(function(){return document.body ? document.body.innerText : '';})()",
+                        value -> {
+                            EtfItem parsed = null;
+                            try {
+                                String text = new org.json.JSONArray("[" + value + "]").getString(0);
+                                parsed = EtfApi.parseTextForNav(text, code, base);
+                            } catch (Exception ignored) {}
+
+                            try { view.destroy(); } catch (Exception ignored) {}
+
+                            if (parsed != null && parsed.nav != null && !parsed.nav.isEmpty()) {
+                                parsed.source = "TWSE 淨值揭露專區 WebView";
+                                finishFetch(code, parsed, showToast);
+                            } else {
+                                fetchNavViaWebView(code, base, showToast, step + 1);
+                            }
+                        }), 5000);
+            }
+        });
+        webView.loadUrl(urls[step]);
     }
 
     private void refreshAllFromApi() {
@@ -212,7 +257,7 @@ public class MainActivity extends Activity {
             int ok = 0;
             int fail = 0;
             for (String code : codes) {
-                EtfItem item = EtfApi.fetch(store.getApiUrl(), code);
+                EtfItem item = EtfApi.fetchDirect(code);
                 if (item.hasError()) fail++; else { ok++; store.saveItem(item); }
             }
             int finalOk = ok;
