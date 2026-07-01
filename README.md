@@ -1,21 +1,48 @@
-# ETF 淨值追蹤 App
+# ETF NAV Tracker v1.0.1
 
-Android 原生 Java 版，設計目標是可以直接丟到 GitHub，用 GitHub Actions 編譯 Debug APK。
+Android App，可自行輸入 ETF 代碼，透過你的後端 API 查詢淨值、市價、折溢價，並在本機保存自選清單。
 
-## 功能
+## GitHub Actions 編譯重點
 
-- 使用者自行輸入 ETF 代碼，例如 `0056`、`00878`、`00713`、`00981A`
-- 自選清單儲存在手機本機 SharedPreferences
-- 可手動更新單檔或全部 ETF
-- 每天 18:30 透過 AlarmManager 嘗試背景更新
-- API URL 可在 App 首頁輸入與儲存
-- 支援兩種 API JSON 格式：
-  - 自家後端格式
-  - TWSE-style `msgArray` 格式
+GitHub 只會偵測 repo 根目錄底下的：
 
-## App 端期待的自家後端格式
+```text
+.github/workflows/android-build.yml
+```
 
-`GET /api/etf/latest?code=0056`
+正確根目錄應該長這樣：
+
+```text
+ETF-app/
+├── .github/workflows/android-build.yml
+├── app/
+├── build.gradle.kts
+├── settings.gradle.kts
+├── gradle.properties
+└── README.md
+```
+
+不要變成這樣：
+
+```text
+ETF-app/
+└── etf_nav_app_github_v1_0_1/
+    ├── .github/workflows/android-build.yml
+    ├── app/
+    └── build.gradle.kts
+```
+
+如果 Actions 頁面顯示「Get started with GitHub Actions」，代表 `.github/workflows/android-build.yml` 不在 repo 根目錄，或還沒有 commit 到目前分支。
+
+## API 格式
+
+App 會呼叫：
+
+```text
+GET /api/etf/latest?code=0056
+```
+
+期待回傳：
 
 ```json
 {
@@ -31,39 +58,3 @@ Android 原生 Java 版，設計目標是可以直接丟到 GitHub，用 GitHub 
   "source": "backend"
 }
 ```
-
-查不到：
-
-```json
-{
-  "success": false,
-  "code": "99999",
-  "message": "ETF 代碼不存在或目前無淨值資料"
-}
-```
-
-## GitHub 編譯方式
-
-1. 建立一個新的 GitHub repository
-2. 把本專案全部檔案上傳到 repo 根目錄
-3. 進入 GitHub repo 的 `Actions`
-4. 執行 `Android APK Build`
-5. 完成後到 workflow run 的 `Artifacts` 下載 `etf-nav-debug-apk`
-
-## 本機編譯
-
-如果你本機有 Android Studio，直接開啟資料夾即可。若用命令列，需要安裝 Android SDK、JDK 17、Gradle 9.3.1。
-
-```bash
-gradle assembleDebug --no-daemon
-```
-
-APK 位置：
-
-```text
-app/build/outputs/apk/debug/app-debug.apk
-```
-
-## 注意
-
-這版先處理 App 與 GitHub 編譯主線。ETF 淨值資料來源建議由後端統一抓 MOPS / TWSE / 投信資料，再提供乾淨 JSON 給 App。不要讓 App 直接到處爬網站，因為那是把未來維護地獄提前搬進手機。

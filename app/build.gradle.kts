@@ -4,12 +4,12 @@ plugins {
 
 android {
     namespace = "com.deepblue.etfnav"
-    compileSdk = 37
+    compileSdk = 35
 
     defaultConfig {
         applicationId = "com.deepblue.etfnav"
         minSdk = 23
-        targetSdk = 37
+        targetSdk = 35
         versionCode = 1
         versionName = "1.0.0"
     }
