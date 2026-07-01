@@ -1,0 +1,5 @@
+<resources>
+    <color name="app_bg">#F6F7F9</color>
+    <color name="card_bg">#FFFFFF</color>
+    <color name="text_main">#202124</color>
+</resources>
